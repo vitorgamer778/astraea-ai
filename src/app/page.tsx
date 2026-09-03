@@ -11,5 +11,6 @@ export default async function Home() {
     if (!data?.claims) redirect("/login");
     email = typeof data.claims.email === "string" ? data.claims.email : null;
   }
-  return <ChatWorkspace email={email} isPreview={!isSupabaseConfigured()} />;
+  const aiConfigured = Boolean(process.env.AI_GATEWAY_API_KEY || process.env.VERCEL_OIDC_TOKEN);
+  return <ChatWorkspace email={email} isPreview={!isSupabaseConfigured()} aiConfigured={aiConfigured} />;
 }
