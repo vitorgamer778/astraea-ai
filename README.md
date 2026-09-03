@@ -15,6 +15,7 @@ Set `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` to con
 ## Current integration
 
 - Supabase SSR authentication and session refresh
+- Email/password and Google OAuth sign-in through Supabase Auth
 - Sign-in, registration, sign-out, and protected routes
 - Existing workspace membership and row-level security model
 - Persistent conversations and messages
