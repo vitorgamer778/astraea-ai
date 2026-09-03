@@ -8,7 +8,77 @@ const requestSchema = z.object({
     role: z.enum(["user", "assistant"]),
     content: z.string().trim().min(1).max(12_000),
   })).min(1).max(40),
-});
+}).refine(
+  ({ messages }) => messages.reduce((total, message) => total + message.content.length, 0) <= 48_000,
+  { message: "The conversation history is too large.", path: ["messages"] },
+);
+
+function gatewayErrorResponse(error: unknown) {
+  const statusCode = typeof error === "object" && error !== null && "statusCode" in error
+    ? Number(error.statusCode)
+    : undefined;
+  if (statusCode === 429) {
+    return Response.json({ error: "Too many AI requests. Please wait a moment and try again." }, { status: 429 });
+  }
+  console.error("[api/chat] AI Gateway request failed", {
+    name: error instanceof Error ? error.name : "UnknownError",
+    statusCode,
+  });
+  return Response.json({ error: "Astraea's AI provider is unavailable. Please try again shortly." }, { status: 503 });
+}
+
+async function createTextStreamResponse(result: ReturnType<typeof streamText>) {
+  const iterator = result.stream[Symbol.asyncIterator]();
+  let firstText = "";
+
+  try {
+    while (true) {
+      const part = await iterator.next();
+      if (part.done) return gatewayErrorResponse(new Error("The model returned no text."));
+      if (part.value.type === "error") return gatewayErrorResponse(part.value.error);
+      if (part.value.type === "abort") return gatewayErrorResponse(new Error(part.value.reason ?? "The model request was aborted."));
+      if (part.value.type === "text-delta") {
+        firstText = part.value.text;
+        break;
+      }
+    }
+  } catch (error) {
+    return gatewayErrorResponse(error);
+  }
+
+  const encoder = new TextEncoder();
+  const body = new ReadableStream<Uint8Array>({
+    async start(controller) {
+      controller.enqueue(encoder.encode(firstText));
+      try {
+        while (true) {
+          const part = await iterator.next();
+          if (part.done) break;
+          if (part.value.type === "text-delta") controller.enqueue(encoder.encode(part.value.text));
+          if (part.value.type === "error") throw part.value.error;
+          if (part.value.type === "abort") throw new Error(part.value.reason ?? "The model request was aborted.");
+        }
+        controller.close();
+      } catch (error) {
+        console.error("[api/chat] AI Gateway stream failed", {
+          name: error instanceof Error ? error.name : "UnknownError",
+        });
+        controller.error(error);
+      }
+    },
+    cancel() {
+      void iterator.return?.();
+    },
+  });
+
+  return new Response(body, {
+    headers: {
+      "Cache-Control": "no-store",
+      "Content-Type": "text/plain; charset=utf-8",
+      "X-Content-Type-Options": "nosniff",
+    },
+  });
+}
 
 export async function POST(request: Request) {
   const supabase = await createClient();
@@ -33,7 +103,14 @@ export async function POST(request: Request) {
     model: gateway(process.env.ASTRAEA_MODEL ?? "openai/gpt-5.6-luna"),
     system: "You are Astraea, a precise, thoughtful AI assistant. Answer in the user's language. Be clear, useful, honest about uncertainty, and format technical answers with readable Markdown. Never claim access to workspace knowledge unless relevant context was explicitly provided.",
     messages: parsed.data.messages as ModelMessage[],
+    maxOutputTokens: 1_200,
+    providerOptions: {
+      gateway: {
+        user: auth.user.id,
+        tags: ["feature:chat", "env:production"],
+      },
+    },
   });
 
-  return result.toTextStreamResponse();
+  return createTextStreamResponse(result);
 }

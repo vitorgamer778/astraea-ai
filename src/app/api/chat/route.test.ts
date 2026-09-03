@@ -3,7 +3,12 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   createClient: vi.fn(),
   gateway: vi.fn((id: string) => ({ id })),
-  streamText: vi.fn(() => ({ toTextStreamResponse: () => new Response("Hello from Astraea") })),
+  streamText: vi.fn(() => ({
+    stream: (async function* () {
+      yield { type: "text-delta", id: "text-1", text: "Hello " };
+      yield { type: "text-delta", id: "text-1", text: "from Astraea" };
+    })(),
+  })),
 }));
 
 vi.mock("@/lib/supabase/server", () => ({ createClient: mocks.createClient }));
@@ -49,6 +54,24 @@ describe("POST /api/chat", () => {
     expect(response.status).toBe(200);
     await expect(response.text()).resolves.toBe("Hello from Astraea");
     expect(mocks.gateway).toHaveBeenCalledWith("openai/gpt-5.6-luna");
-    expect(mocks.streamText).toHaveBeenCalledWith(expect.objectContaining({ messages: [{ role: "user", content: "Hello" }] }));
+    expect(mocks.streamText).toHaveBeenCalledWith(expect.objectContaining({ messages: [{ role: "user", content: "Hello" }], maxOutputTokens: 1_200 }));
+  });
+
+  it("surfaces an AI provider failure instead of returning an empty 200 stream", async () => {
+    process.env.AI_GATEWAY_API_KEY = "test-key";
+    mocks.createClient.mockResolvedValue(supabaseFor({ id: "user-a" }));
+    mocks.streamText.mockReturnValueOnce({
+      stream: (async function* () { yield { type: "error", error: { statusCode: 403 } }; })(),
+    } as never);
+    const response = await POST(request({ conversationId, messages: [{ role: "user", content: "Hello" }] }));
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toEqual({ error: "Astraea's AI provider is unavailable. Please try again shortly." });
+  });
+
+  it("rejects an oversized aggregate conversation history", async () => {
+    process.env.AI_GATEWAY_API_KEY = "test-key";
+    mocks.createClient.mockResolvedValue(supabaseFor({ id: "user-a" }));
+    const response = await POST(request({ conversationId, messages: Array.from({ length: 5 }, () => ({ role: "user", content: "x".repeat(10_000) })) }));
+    expect(response.status).toBe(400);
   });
 });
