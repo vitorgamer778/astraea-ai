@@ -10,7 +10,7 @@ cp .env.example .env.local
 pnpm dev
 ```
 
-Set `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` to connect the existing Supabase project. Set `AI_GATEWAY_API_KEY` for local AI responses; Vercel deployments can use their automatically injected OIDC token. Without Supabase variables, Astraea runs in an explicit local preview mode and never writes remote data.
+Set `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` to connect the existing Supabase project. The portfolio version uses transparent local demo responses and does not send messages to an external AI provider. Without Supabase variables, Astraea runs in an explicit local preview mode and never writes remote data.
 
 ## Current integration
 
@@ -18,7 +18,7 @@ Set `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` to con
 - Sign-in, registration, sign-out, and protected routes
 - Existing workspace membership and row-level security model
 - Persistent conversations and messages
-- Authenticated streaming AI responses through Vercel AI Gateway
+- Transparent local demo responses with no external AI provider
 - Conversation search, rename, and delete actions
 - Enter to send, Shift+Enter for newline, focus restoration, and auto-growing composer
 - Responsive sidebar, Markdown, styled code blocks, and polished loading/error states

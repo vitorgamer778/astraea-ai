@@ -11,6 +11,7 @@ import { ChatSidebar } from "./chat-sidebar";
 import { MessageContent } from "./message-content";
 import { createClient } from "@/lib/supabase/client";
 import { createConversation, deleteConversation, listConversations, listMessages, renameConversation, saveMessage } from "@/lib/chat/repository";
+import { createDemoResponse } from "@/lib/chat/demo-response";
 import { shouldSubmitMessage } from "@/lib/chat/keyboard";
 import type { Conversation, Message } from "@/lib/chat/types";
 
@@ -23,7 +24,7 @@ function localMessage(conversationId: string, role: Message["role"], content: st
   return { id: crypto.randomUUID(), conversation_id: conversationId, role, content, created_at: new Date().toISOString() };
 }
 
-export function ChatWorkspace({ email, isPreview, aiConfigured }: { email: string | null; isPreview: boolean; aiConfigured: boolean }) {
+export function ChatWorkspace({ email, isPreview }: { email: string | null; isPreview: boolean }) {
   const [conversations, setConversations] = useState<Conversation[]>(isPreview ? [previewConversation] : []);
   const [activeId, setActiveId] = useState<string | null>(isPreview ? "preview" : null);
   const [messages, setMessages] = useState<Message[]>(isPreview ? previewMessages : []);
@@ -117,40 +118,13 @@ export function ChatWorkspace({ email, isPreview, aiConfigured }: { email: strin
       const workspaceId = activeConversation?.workspace_id;
       if (!isPreview) await saveMessage(createClient(), { conversation_id: conversationId, workspace_id: workspaceId, role: "user", content });
 
-      if (isPreview) {
-        const response = localMessage(conversationId, "assistant", "Preview mode is active. Connect Supabase and the AI Gateway to chat with Astraea.");
-        setMessages((current) => [...current, response]);
-      } else {
-        const assistant = localMessage(conversationId, "assistant", "");
-        pendingAssistantId = assistant.id;
-        setMessages((current) => [...current, assistant]);
-        const apiResponse = await fetch("/api/chat", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            conversationId,
-            messages: [...messages, optimistic].filter((message) => message.role !== "system").map(({ role, content: messageContent }) => ({ role, content: messageContent })),
-          }),
-        });
-        if (!apiResponse.ok) {
-          const body = await apiResponse.json().catch(() => null) as { error?: string } | null;
-          throw new Error(body?.error ?? "Astraea could not answer right now.");
-        }
-        if (!apiResponse.body) throw new Error("Astraea returned an empty response.");
-
-        const reader = apiResponse.body.getReader();
-        const decoder = new TextDecoder();
-        let answer = "";
-        while (true) {
-          const { done, value: chunk } = await reader.read();
-          if (done) break;
-          answer += decoder.decode(chunk, { stream: true });
-          setMessages((current) => current.map((message) => message.id === assistant.id ? { ...message, content: answer } : message));
-        }
-        answer += decoder.decode();
-        if (!answer.trim()) throw new Error("Astraea returned an empty response.");
-        await saveMessage(createClient(), { conversation_id: conversationId, workspace_id: workspaceId, role: "assistant", content: answer });
-      }
+      const assistant = localMessage(conversationId, "assistant", "");
+      pendingAssistantId = assistant.id;
+      setMessages((current) => [...current, assistant]);
+      await new Promise((resolve) => setTimeout(resolve, 450));
+      const answer = createDemoResponse(content);
+      setMessages((current) => current.map((message) => message.id === assistant.id ? { ...message, content: answer } : message));
+      if (!isPreview) await saveMessage(createClient(), { conversation_id: conversationId, workspace_id: workspaceId, role: "assistant", content: answer });
     } catch (reason) {
       if (pendingAssistantId) setMessages((current) => current.filter((message) => message.id !== pendingAssistantId));
       setError(reason instanceof Error ? reason.message : "Your message could not be saved.");
@@ -168,7 +142,7 @@ export function ChatWorkspace({ email, isPreview, aiConfigured }: { email: strin
   return <main className="flex h-screen overflow-hidden bg-background">
     <ChatSidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} conversations={conversations} activeId={activeId} email={email} isPreview={isPreview} onSelect={(id) => { setSidebarOpen(false); void loadConversation(id); }} onNew={() => { setSidebarOpen(false); void newConversation(); }} onRename={(id, title) => void rename(id, title)} onDelete={(id) => void remove(id)} />
     <section className="relative flex min-w-0 flex-1 flex-col">
-      <header className="flex h-16 shrink-0 items-center border-b border-white/[0.07] bg-background/80 px-4 backdrop-blur-xl sm:px-6"><Button onClick={() => setSidebarOpen(true)} variant="ghost" size="icon" className="mr-2 lg:hidden" aria-label="Open sidebar"><Menu /></Button><div><p className="text-sm font-semibold">Astraea Core</p><p className="text-[10px] text-muted-foreground">GPT-5.6 Luna · secure workspace</p></div><div className="ml-auto flex items-center gap-2">{isPreview && <span className="rounded-full border border-primary/20 bg-primary/10 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wider text-primary">Local preview</span>}<span className="hidden items-center gap-1.5 text-[11px] text-muted-foreground sm:flex"><i className={aiConfigured ? "size-1.5 rounded-full bg-emerald-400" : "size-1.5 rounded-full bg-amber-400"} />{aiConfigured ? "AI ready" : "AI setup required"}</span></div></header>
+      <header className="flex h-16 shrink-0 items-center border-b border-white/[0.07] bg-background/80 px-4 backdrop-blur-xl sm:px-6"><Button onClick={() => setSidebarOpen(true)} variant="ghost" size="icon" className="mr-2 lg:hidden" aria-label="Open sidebar"><Menu /></Button><div><p className="text-sm font-semibold">Astraea Core</p><p className="text-[10px] text-muted-foreground">Interactive portfolio experience</p></div><div className="ml-auto flex items-center gap-2">{isPreview && <span className="rounded-full border border-primary/20 bg-primary/10 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wider text-primary">Local preview</span>}<span className="flex items-center gap-1.5 rounded-full border border-primary/20 bg-primary/10 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wider text-primary"><i className="size-1.5 rounded-full bg-primary" />Demo mode</span></div></header>
       <ScrollArea className="astraea-grid min-h-0 flex-1"><div className="mx-auto flex min-h-full w-full max-w-3xl flex-col px-4 py-8 sm:px-8 sm:py-12">
         {initializing ? <div className="flex flex-1 items-center justify-center"><LoaderCircle className="size-5 animate-spin text-primary" /></div> : messages.length === 0 ? <div className="flex flex-1 flex-col items-center justify-center py-20 text-center"><span className="mb-5 grid size-14 place-items-center rounded-2xl border border-primary/25 bg-primary/10 text-primary"><Sparkles className="size-6" /></span><h1 className="text-3xl font-semibold tracking-[-0.045em] sm:text-4xl">What will we explore?</h1><p className="mt-3 max-w-md text-sm leading-6 text-muted-foreground">Start a conversation. Your messages will stay connected to your Astraea workspace.</p></div> : <div className="space-y-8">{messages.map((message) => <article key={message.id} className="flex gap-3 sm:gap-4"><Avatar className="mt-0.5 size-7 shrink-0"><AvatarFallback className={message.role === "assistant" ? "bg-primary/15 text-[10px] text-primary" : "bg-secondary text-[10px]"}>{message.role === "assistant" ? "A" : "YOU"}</AvatarFallback></Avatar><div className="min-w-0 flex-1"><p className="mb-2 text-xs font-semibold text-muted-foreground">{message.role === "assistant" ? "Astraea" : "You"}</p><MessageContent content={message.content} /></div></article>)}{loading && <div className="flex items-center gap-3 text-sm text-muted-foreground"><span className="flex gap-1"><i className="size-1.5 animate-pulse rounded-full bg-primary" /><i className="size-1.5 animate-pulse rounded-full bg-primary [animation-delay:150ms]" /><i className="size-1.5 animate-pulse rounded-full bg-primary [animation-delay:300ms]" /></span>Astraea is thinking</div>}<div ref={endRef} /></div>}
       </div></ScrollArea>
